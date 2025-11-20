@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/gofiber/fiber/v3"
@@ -9,6 +10,16 @@ import (
 
 func main() {
 	app := fiber.New()
+
+	sess := sessions
+
+	app.Use(func(c fiber.Ctx) error {
+		if c.Request().URI().String() == "http://127.0.0.1:8080/favicon.ico" {
+			return c.Next()
+		}
+		fmt.Println("REQUEST INCOMING: ", c.Request().URI())
+		return c.Next()
+	})
 
 	app.Get("/", func(c fiber.Ctx) error {
 		return c.SendString(":3")
@@ -21,9 +32,14 @@ func main() {
 			return errors.New("Go fuck yourself")
 		}
 
-		session := GetSession(username)
-		if err := session.Fetch(); err != nil {
-			return err
+		session := sess.Get(username)
+		if session == nil {
+			fmt.Println("Creating new session")
+			s, err := CreateSession(username)
+			if err != nil {
+				return err
+			}
+			return c.JSON(s)
 		}
 
 		return c.JSON(session)

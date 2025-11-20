@@ -1,27 +1,163 @@
 package main
 
 import (
-	"encoding/json"
+	"fmt"
+	"runtime/debug"
 	"sync"
 	"time"
+
+	"github.com/bytedance/sonic"
+	"github.com/google/uuid"
 )
 
 type Session struct {
-	Username string        `json:"username"`
-	Start    Stats         `json:"start"`
-	Last     Stats         `json:"last"`
-	Session  ActiveSession `json:"session"`
+	ID       string
+	Username string
+
+	StartTime  time.Time
+	LastUpdate time.Time
+	Failed     int
+
+	Start   Statistics
+	Recent  Statistics
+	Session ActiveSession
+
+	mu sync.Mutex
 }
 
-type Result struct {
+type Sessions struct {
+	_  noCopy // <<< compile-time safety
+	mu sync.RWMutex
+	m  map[string]*Session
+}
+
+type noCopy struct{}
+
+func (*noCopy) Lock()   {}
+func (*noCopy) Unlock() {}
+
+var sessions = NewSessions()
+
+func NewSessions() *Sessions {
+	return &Sessions{
+		m: make(map[string]*Session),
+	}
+}
+
+func (s *Sessions) Set(key string, value *Session) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	fmt.Printf("SET key=[%s] len=%d\n", key, len(key))
+	println("sessions pointer in Set:", sessions)
+	println("set pointer:", s)
+	fmt.Println("SET callee:", key, "STACK:")
+	debug.PrintStack()
+	s.m[key] = value
+}
+
+func (s *Sessions) Get(key string) *Session {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	fmt.Printf("GET key=[%s] len=%d\n", key, len(key))
+	println("sessions pointer:", sessions)
+	println("get pointer:", s)
+	println("nil: ", s.m[key] == nil)
+
+	fmt.Printf("KEY GET raw bytes: %v\n", []byte(key))
+	fmt.Printf("MAP HAS KEYS:\n")
+	for k := range s.m {
+		fmt.Printf("  key=%q bytes=%v\n", k, []byte(k))
+	}
+
+	return s.m[key]
+}
+
+func (s *Sessions) Delete(key string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	fmt.Printf("DELETE key=[%s] len=%d\n", key, len(key))
+	delete(s.m, key)
+}
+
+// var scoresSeen sync.Map
+
+func CreateSession(username string) (*Session, error) {
+	data, err := Fetch("/users/" + username)
+	if err != nil {
+		return nil, err
+	}
+
+	var result UserResponse
+	if err := sonic.Unmarshal(data, &result); err != nil {
+		return nil, err
+	}
+
+	if !result.Online {
+		return nil, ErrOffline
+	}
+
+	now := time.Now()
+
+	session := &Session{
+		ID:         uuid.NewString(),
+		Username:   username,
+		StartTime:  now,
+		LastUpdate: now,
+		Start:      result.Statistics,
+		Recent:     result.Statistics,
+	}
+
+	fmt.Println("SETTING USERNAME IN CreateSession: ", username)
+
+	sessions.Set(username, session)
+	return session, nil
+}
+
+func (s *Session) Update() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	data, err := Fetch("/users/" + s.Username)
+	if err != nil {
+		return err
+	}
+
+	var result UserResponse
+	if err := sonic.Unmarshal(data, &result); err != nil {
+		return err
+	}
+
+	if !result.Online {
+		//TODO: Change this behaviour
+		fmt.Println("Not online")
+		if s.Failed >= 10 {
+			sessions.Delete(s.Username)
+		}
+		return ErrOffline
+	}
+
+	s.Recent = result.Statistics
+	s.LastUpdate = time.Now()
+
+	s.Session.Time = int(s.LastUpdate.Sub(s.StartTime).Seconds())
+	s.Session.GlobalRank = s.Start.GlobalRank - s.Recent.GlobalRank
+	s.Session.CountryRank = s.Start.CountryRank - s.Recent.CountryRank
+	s.Session.PP = s.Recent.PP - s.Start.PP
+	s.Session.RankedScore = s.Recent.RankedScore - s.Start.RankedScore
+	s.Session.TotalScore = s.Recent.TotalScore - s.Start.TotalScore
+	s.Session.Accuracy = s.Recent.Accuracy - s.Start.Accuracy
+	s.Session.Playcount = s.Recent.Playcount - s.Start.Playcount
+	s.Session.Playtime = s.Recent.Playtime - s.Start.Playtime
+	s.Session.TotalHits = s.Recent.TotalHits - s.Start.TotalHits
+	s.Session.Level = s.Recent.Level.Current - s.Start.Level.Current
+
+	return nil
+}
+
+type UserResponse struct {
 	ID         int        `json:"id"`
 	Username   string     `json:"username"`
 	Online     bool       `json:"is_online"`
-	Statistics Statistics `json:"statistics"`
-}
-
-type Stats struct {
-	Time       time.Time  `json:"time"`
+	LastVisit  time.Time  `json:"last_visit"`
 	Statistics Statistics `json:"statistics"`
 }
 
@@ -39,6 +175,22 @@ type ActiveSession struct {
 	TotalHits   int     `json:"total_hits"`
 	Level       int     `json:"level"`
 	Scores      int     `json:"scores"`
+	Passed      int     `json:"passed"`
+	Ranks       Ranks   `json:"ranks"`
+	AccuracyAvg float64 `json:"avg_accuracy"`
+	accuracies  float64
+}
+
+type Ranks struct {
+	XH int `json:"xh"`
+	X  int `json:"x"`
+	SH int `json:"sh"`
+	S  int `json:"s"`
+	A  int `json:"a"`
+	B  int `json:"b"`
+	C  int `json:"c"`
+	D  int `json:"d"`
+	F  int `json:"f"`
 }
 
 /*
@@ -62,69 +214,9 @@ type Statistics struct {
 	} `json:"level"`
 }
 
-var Sessions = map[string]*Session{}
-var SessionMutex sync.Mutex
-
-func GetSession(username string) *Session {
-	SessionMutex.Lock()
-	session, ok := Sessions[username]
-	if !ok {
-		session = &Session{
-			Username: username,
-		}
-		Sessions[username] = session
-	}
-	SessionMutex.Unlock()
-	return session
-}
-
-func (s *Session) Destroy() {
-	SessionMutex.Lock()
-	delete(Sessions, s.Username)
-	SessionMutex.Unlock()
-}
-
-func (s *Session) Fetch() error {
-	data, err := Fetch("/users/" + s.Username)
-	if err != nil {
-		return err
-	}
-
-	var result Result
-
-	if err := json.Unmarshal(data, &result); err != nil {
-		return err
-	}
-
-	if !result.Online {
-		s.Destroy()
-		return ErrOffline
-	}
-
-	s.Last.Statistics = result.Statistics
-	s.Last.Time = time.Now()
-
-	if s.Start.Time.IsZero() {
-		s.Start.Statistics = result.Statistics
-		s.Start.Time = time.Now()
-	}
-
-	s.Session.Time = int(s.Last.Time.Sub(s.Start.Time).Seconds())
-	s.Session.GlobalRank = s.Start.Statistics.GlobalRank - s.Last.Statistics.GlobalRank
-	s.Session.CountryRank = s.Start.Statistics.CountryRank - s.Last.Statistics.CountryRank
-	s.Session.PP = s.Last.Statistics.PP - s.Start.Statistics.PP
-	s.Session.RankedScore = s.Last.Statistics.RankedScore - s.Start.Statistics.RankedScore
-	s.Session.TotalScore = s.Last.Statistics.TotalScore - s.Start.Statistics.TotalScore
-	s.Session.Accuracy = s.Last.Statistics.Accuracy - s.Start.Statistics.Accuracy
-	s.Session.Playcount = s.Last.Statistics.Playcount - s.Start.Statistics.Playcount
-	s.Session.Playtime = s.Last.Statistics.Playtime - s.Start.Statistics.Playtime
-	s.Session.TotalHits = s.Last.Statistics.TotalHits - s.Start.Statistics.TotalHits
-	s.Session.Level = s.Last.Statistics.Level.Current - s.Start.Statistics.Level.Current
-
-	// scores, err := Fetch("/users/" + s.Username + "/scores/recent")
-	// if err != nil {
-	// 	return err
-	// }
-
-	return nil
+type Score struct {
+	ID       int     `json:"id"`
+	PP       float64 `json:"pp"`
+	Rank     string  `json:"rank"`
+	Accuracy float64 `json:"accuracy"`
 }
