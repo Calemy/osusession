@@ -1,18 +1,21 @@
 package main
 
 import (
+	"time"
+
 	"github.com/bytedance/sonic"
 )
 
 type Score struct {
-	ID       int     `json:"id"`
-	PP       float64 `json:"pp"`
-	Rank     string  `json:"rank"`
-	Accuracy float64 `json:"accuracy"`
-	UserID   int     `json:"user_id"`
-	Passed   bool    `json:"passed"`
-	MaxCombo int     `json:"max_combo"`
-	Perfect  bool    `json:"is_perfect_combo"`
+	ID       int       `json:"id"`
+	PP       float64   `json:"pp"`
+	Rank     string    `json:"rank"`
+	Accuracy float64   `json:"accuracy"`
+	UserID   int       `json:"user_id"`
+	Passed   bool      `json:"passed"`
+	MaxCombo int       `json:"max_combo"`
+	Perfect  bool      `json:"is_perfect_combo"`
+	Time     time.Time `json:"ended_at"`
 }
 
 type ScoresResponse struct {
@@ -42,6 +45,7 @@ func GetScores() error {
 		}
 
 		session.Session.Scores += 1
+		session.LastScore = score.Time
 
 		session.Session.accuracies += score.Accuracy
 		session.Session.AccuracyAvg = session.Session.accuracies / float64(session.Session.Scores)
