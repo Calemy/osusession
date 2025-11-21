@@ -1,8 +1,6 @@
 package main
 
 import (
-	"sync"
-
 	"github.com/bytedance/sonic"
 )
 
@@ -22,7 +20,6 @@ type ScoresResponse struct {
 	CursorString string  `json:"cursor_string"` //TODO: add functionality to this
 }
 
-var scoresSeen sync.Map
 var cursorString string
 
 func GetScores() error {
@@ -39,11 +36,6 @@ func GetScores() error {
 	cursorString = response.CursorString
 
 	for _, score := range response.Scores {
-		_, loaded := scoresSeen.LoadOrStore(score.ID, struct{}{})
-		if loaded {
-			continue
-		}
-
 		session := sessions.Get(score.UserID)
 		if session == nil {
 			continue
