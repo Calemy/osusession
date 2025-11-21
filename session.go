@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"sync"
 	"time"
 
@@ -11,10 +10,11 @@ import (
 type Session struct {
 	ID       int    `json:"id"`
 	Username string `json:"username"`
+	Online   bool   `json:"online"`
 
 	StartTime  time.Time `json:"start_time"`
 	LastUpdate time.Time `json:"last_update"`
-	Failed     int       `json:"failed"`
+	LastScore  time.Time `json:"last_score"`
 
 	Start   Statistics    `json:"start"`
 	Recent  Statistics    `json:"recent"`
@@ -61,15 +61,12 @@ func CreateSession(username string) (*Session, error) {
 		return nil, err
 	}
 
-	if !result.Online {
-		return nil, ErrOffline
-	}
-
 	now := time.Now()
 
 	session := &Session{
 		ID:         result.ID,
 		Username:   username,
+		Online:     result.Online,
 		StartTime:  now,
 		LastUpdate: now,
 		Start:      result.Statistics,
@@ -94,18 +91,14 @@ func (s *Session) Update() error {
 		return err
 	}
 
+	s.Recent = result.Statistics
+	s.Online = result.Online
+
 	if !result.Online {
-		//TODO: Change this behaviour
-		fmt.Println("Not online")
-		if s.Failed >= 10 {
-			sessions.Delete(s.ID)
-		}
-		return ErrOffline
+		return nil
 	}
 
-	s.Recent = result.Statistics
 	s.LastUpdate = time.Now()
-
 	s.Session.Time = int(s.LastUpdate.Sub(s.StartTime).Seconds())
 	s.Session.GlobalRank = s.Start.GlobalRank - s.Recent.GlobalRank
 	s.Session.CountryRank = s.Start.CountryRank - s.Recent.CountryRank
@@ -182,4 +175,20 @@ type Statistics struct {
 		Current  int `json:"current"`
 		Progress int `json:"progress"`
 	} `json:"level"`
+}
+
+func ClearSessions() {
+	for k, v := range sessions.m {
+		if !v.Online {
+			if time.Since(v.LastUpdate) > time.Minute*15 {
+				sessions.Delete(k)
+				users.Delete(v.Username)
+			}
+		} else {
+			if time.Since(v.LastScore) > time.Hour*6 && time.Since(v.LastUpdate) > time.Minute*15 {
+				sessions.Delete(k)
+				users.Delete(v.Username)
+			}
+		}
+	}
 }
