@@ -2,9 +2,11 @@ package main
 
 import (
 	"log"
+	"os"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	_ "github.com/joho/godotenv/autoload"
 )
 
 func main() {
@@ -13,14 +15,14 @@ func main() {
 		username := ctx.Param("username")
 
 		if username == "" {
-			ctx.String(500, "go fuck yourself")
+			ctx.JSON(400, Error("No username provided"))
 		}
 
 		user := users.Get(username)
 		if user == 0 {
 			s, err := CreateSession(username)
 			if err != nil {
-				ctx.String(500, err.Error())
+				ctx.JSON(500, Error(err.Error()))
 			}
 			ctx.JSON(200, s)
 			return
@@ -29,7 +31,7 @@ func main() {
 		if session == nil {
 			s, err := CreateSession(username)
 			if err != nil {
-				ctx.String(500, "gay sex")
+				ctx.JSON(500, Error(err.Error()))
 				return
 			}
 
@@ -49,7 +51,7 @@ func main() {
 		}
 	}()
 
-	if err := app.Run(":8080"); err != nil {
+	if err := app.Run(os.Getenv("PORT")); err != nil {
 		log.Fatalf("failed to run server: %v", err)
 	}
 }

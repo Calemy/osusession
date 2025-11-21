@@ -10,8 +10,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	_ "github.com/joho/godotenv/autoload"
 )
 
 var token *string = nil

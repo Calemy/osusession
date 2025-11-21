@@ -17,7 +17,7 @@ type Score struct {
 
 type ScoresResponse struct {
 	Scores       []Score `json:"scores"`
-	CursorString string  `json:"cursor_string"` //TODO: add functionality to this
+	CursorString string  `json:"cursor_string"`
 }
 
 var cursorString string
