@@ -10,6 +10,7 @@ import (
 type Session struct {
 	ID       int    `json:"id"`
 	Username string `json:"username"`
+	Country  string `json:"country_code"`
 	Online   bool   `json:"online"`
 
 	StartTime  time.Time `json:"start_time"`
@@ -67,6 +68,7 @@ func CreateSession(username string) (*Session, error) {
 		ID:         result.ID,
 		Username:   username,
 		Online:     result.Online,
+		Country:    result.Country,
 		StartTime:  now,
 		LastUpdate: now,
 		Start:      result.Statistics,
@@ -118,6 +120,7 @@ type UserResponse struct {
 	ID         int        `json:"id"`
 	Username   string     `json:"username"`
 	Online     bool       `json:"is_online"`
+	Country    string     `json:"country_code"`
 	LastVisit  time.Time  `json:"last_visit"`
 	Statistics Statistics `json:"statistics"`
 }
