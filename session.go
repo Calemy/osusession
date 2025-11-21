@@ -2,84 +2,53 @@ package main
 
 import (
 	"fmt"
-	"runtime/debug"
 	"sync"
 	"time"
 
 	"github.com/bytedance/sonic"
-	"github.com/google/uuid"
 )
 
 type Session struct {
-	ID       string
-	Username string
+	ID       int    `json:"id"`
+	Username string `json:"username"`
 
-	StartTime  time.Time
-	LastUpdate time.Time
-	Failed     int
+	StartTime  time.Time `json:"start_time"`
+	LastUpdate time.Time `json:"last_update"`
+	Failed     int       `json:"failed"`
 
-	Start   Statistics
-	Recent  Statistics
-	Session ActiveSession
+	Start   Statistics    `json:"start"`
+	Recent  Statistics    `json:"recent"`
+	Session ActiveSession `json:"session"`
 
 	mu sync.Mutex
 }
 
 type Sessions struct {
-	_  noCopy // <<< compile-time safety
 	mu sync.RWMutex
-	m  map[string]*Session
+	m  map[int]*Session
 }
 
-type noCopy struct{}
-
-func (*noCopy) Lock()   {}
-func (*noCopy) Unlock() {}
-
-var sessions = NewSessions()
-
-func NewSessions() *Sessions {
-	return &Sessions{
-		m: make(map[string]*Session),
-	}
+var sessions = &Sessions{
+	m: make(map[int]*Session),
 }
 
-func (s *Sessions) Set(key string, value *Session) {
+func (s *Sessions) Set(key int, value *Session) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	fmt.Printf("SET key=[%s] len=%d\n", key, len(key))
-	println("sessions pointer in Set:", sessions)
-	println("set pointer:", s)
-	fmt.Println("SET callee:", key, "STACK:")
-	debug.PrintStack()
 	s.m[key] = value
 }
 
-func (s *Sessions) Get(key string) *Session {
+func (s *Sessions) Get(key int) *Session {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	fmt.Printf("GET key=[%s] len=%d\n", key, len(key))
-	println("sessions pointer:", sessions)
-	println("get pointer:", s)
-	println("nil: ", s.m[key] == nil)
-
-	fmt.Printf("KEY GET raw bytes: %v\n", []byte(key))
-	fmt.Printf("MAP HAS KEYS:\n")
-	for k := range s.m {
-		fmt.Printf("  key=%q bytes=%v\n", k, []byte(k))
-	}
-
 	return s.m[key]
 }
 
-func (s *Sessions) Delete(key string) {
+func (s *Sessions) Delete(key int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	fmt.Printf("DELETE key=[%s] len=%d\n", key, len(key))
 	delete(s.m, key)
 }
-
-// var scoresSeen sync.Map
 
 func CreateSession(username string) (*Session, error) {
 	data, err := Fetch("/users/" + username)
@@ -99,7 +68,7 @@ func CreateSession(username string) (*Session, error) {
 	now := time.Now()
 
 	session := &Session{
-		ID:         uuid.NewString(),
+		ID:         result.ID,
 		Username:   username,
 		StartTime:  now,
 		LastUpdate: now,
@@ -107,9 +76,8 @@ func CreateSession(username string) (*Session, error) {
 		Recent:     result.Statistics,
 	}
 
-	fmt.Println("SETTING USERNAME IN CreateSession: ", username)
-
-	sessions.Set(username, session)
+	sessions.Set(result.ID, session)
+	users.Set(username, result.ID)
 	return session, nil
 }
 
@@ -130,7 +98,7 @@ func (s *Session) Update() error {
 		//TODO: Change this behaviour
 		fmt.Println("Not online")
 		if s.Failed >= 10 {
-			sessions.Delete(s.Username)
+			sessions.Delete(s.ID)
 		}
 		return ErrOffline
 	}
@@ -177,6 +145,8 @@ type ActiveSession struct {
 	Scores      int     `json:"scores"`
 	Passed      int     `json:"passed"`
 	Ranks       Ranks   `json:"ranks"`
+	MaxCombo    int     `json:"max_combo"`
+	FCs         int     `json:"fcs"`
 	AccuracyAvg float64 `json:"avg_accuracy"`
 	accuracies  float64
 }
@@ -212,11 +182,4 @@ type Statistics struct {
 		Current  int `json:"current"`
 		Progress int `json:"progress"`
 	} `json:"level"`
-}
-
-type Score struct {
-	ID       int     `json:"id"`
-	PP       float64 `json:"pp"`
-	Rank     string  `json:"rank"`
-	Accuracy float64 `json:"accuracy"`
 }

@@ -1,57 +1,54 @@
 package main
 
 import (
-	"errors"
-	"fmt"
-	"strings"
+	"log"
+	"time"
 
-	"github.com/gofiber/fiber/v3"
+	"github.com/gin-gonic/gin"
 )
 
 func main() {
-	app := fiber.New()
-
-	sess := sessions
-
-	app.Use(func(c fiber.Ctx) error {
-		if c.Request().URI().String() == "http://127.0.0.1:8080/favicon.ico" {
-			return c.Next()
-		}
-		fmt.Println("REQUEST INCOMING: ", c.Request().URI())
-		return c.Next()
-	})
-
-	app.Get("/", func(c fiber.Ctx) error {
-		return c.SendString(":3")
-	})
-
-	app.Get("/session/:usernames", func(c fiber.Ctx) error {
-		username := strings.ReplaceAll(c.Params("usernames"), " ", "_")
+	app := gin.Default()
+	app.GET("/session/:username", func(ctx *gin.Context) {
+		username := ctx.Param("username")
 
 		if username == "" {
-			return errors.New("Go fuck yourself")
+			ctx.String(500, "go fuck yourself")
 		}
 
-		session := sess.Get(username)
-		if session == nil {
-			fmt.Println("Creating new session")
+		user := users.Get(username)
+		if user == 0 {
 			s, err := CreateSession(username)
 			if err != nil {
-				return err
+				ctx.String(500, err.Error())
 			}
-			return c.JSON(s)
+			ctx.JSON(200, s)
+			return
+		}
+		session := sessions.Get(user)
+		if session == nil {
+			s, err := CreateSession(username)
+			if err != nil {
+				ctx.String(500, "gay sex")
+				return
+			}
+
+			ctx.JSON(200, s)
+			return
 		}
 
-		return c.JSON(session)
+		ctx.JSON(200, session)
 	})
 
-	app.Get("/sessions/:id", func(c fiber.Ctx) error {
-		return c.SendString(".")
-	})
+	go func() {
+		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
 
-	app.Get("/track", func(c fiber.Ctx) error {
-		return c.SendString("here is your code")
-	})
+		for range ticker.C {
+			GetScores()
+		}
+	}()
 
-	app.Listen(":8080")
+		log.Fatalf("failed to run server: %v", err)
+	}
 }
